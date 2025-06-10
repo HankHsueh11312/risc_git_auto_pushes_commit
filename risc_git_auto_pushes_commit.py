@@ -147,15 +147,18 @@ Please return a JSON object in this format:
         return staged + "\n" + unstaged
 
     def manual_select(self, prompt, valid_list):
-        """Let user manually select from valid_list"""
+        """Let user manually select or input value freely"""
         while True:
             print(f"\n{prompt}")
             for i, v in enumerate(valid_list, 1):
                 print(f"{i}. {v}")
-            choice = input("Enter number or value: ").strip()
+            choice = input("Enter number, value, or type your own: ").strip()
             if choice.isdigit() and 1 <= int(choice) <= len(valid_list):
                 return valid_list[int(choice) - 1]
             elif choice in valid_list:
+                return choice
+            elif choice != "":
+                # Allow free-form input
                 return choice
             else:
                 print("Invalid input, please try again.")
@@ -198,18 +201,15 @@ def process_category(committer, repo_path, files, category):
     if not analysis:
         print(f"Failed to analyze {category} changes, skipping.")
         return
-    # 手動補全欄位
-    cpu = analysis['cpu']
-    if not cpu or cpu == "unknown":
-        cpu = committer.manual_select("Select CPU type:", committer.valid_cpus)
-    machine = analysis['machine']
-    if not machine or machine == "unknown":
-        machine = committer.manual_select("Select machine type:", committer.valid_machines)
-    change_type = analysis['type']
-    if not change_type or change_type == "unknown":
-        change_type = committer.manual_select("Select change type:", committer.valid_types)
-    title = analysis['title']
-    details = analysis['details']
+    # Allow user to freely input if AI cannot determine
+    cpu = analysis.get('cpu', '') if analysis.get('cpu', '') and analysis.get('cpu', '') != "unknown" else committer.manual_select("Enter CPU type (or choose):", committer.valid_cpus)
+    machine = analysis.get('machine', '') if analysis.get('machine', '') and analysis.get('machine', '') != "unknown" else committer.manual_select("Enter machine type (or choose):", committer.valid_machines)
+    change_type = analysis.get('type', '') if analysis.get('type', '') and analysis.get('type', '') != "unknown" else committer.manual_select("Enter change type (or choose):", committer.valid_types)
+    title = analysis.get('title', '').strip() or input("Enter commit title: ").strip()
+    details = analysis.get('details', [])
+    if not details:
+        detail_input = input("Enter details for commit message (comma separated): ").strip()
+        details = [d.strip() for d in detail_input.split(",") if d.strip()]
     commit_message = f"[{cpu}][{machine}][{change_type}] {title}\n\n" + "\n".join(details)
     print("\nProposed commit message:")
     print("-" * 50)
