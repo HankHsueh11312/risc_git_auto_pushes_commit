@@ -119,6 +119,14 @@ Please return a JSON object in this format:
         os.chdir(original_dir)
         return list(files)
 
+    def get_untracked_files(self, repo_path):
+        """Return a list of untracked (new) files"""
+        original_dir = os.getcwd()
+        os.chdir(repo_path)
+        out = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard']).decode().splitlines()
+        os.chdir(original_dir)
+        return out
+
     def classify_files(self, files):
         """Classify files into dts, config, drivers, script"""
         dts_files, config_files, drivers_files, script_files = [], [], [], []
@@ -229,7 +237,25 @@ def main():
         return
 
     committer = GitCommitAPI()
+
+    # 1. Get changed (modified/staged) files
     changed_files = committer.get_changed_files(repo_path)
+
+    # 2. Get untracked (new) files, and auto-add to staging if any
+    untracked_files = committer.get_untracked_files(repo_path)
+    if untracked_files:
+        print(f"\nFound new files:\n" + "\n".join(untracked_files))
+        # 直接自動加入 staging，不詢問
+        original_dir = os.getcwd()
+        os.chdir(repo_path)
+        try:
+            subprocess.run(['git', 'add'] + untracked_files, check=True)
+            print("Automatically added new files to staging.")
+            # Need to refresh changed_files (since staged)
+            changed_files = committer.get_changed_files(repo_path)
+        finally:
+            os.chdir(original_dir)
+
     if not changed_files:
         print("No changes to commit")
         return
