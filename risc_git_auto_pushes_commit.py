@@ -19,7 +19,7 @@ class GitCommitAPI:
         }
         self.valid_cpus = ['imx8mm', 'imx8mp', 'imx93']
         self.valid_machines = ['ROM-5721', 'ROM-5722', 'ROM-2820']
-        self.valid_types = ['dts', 'drivers', 'config', 'kconfig', 'script']
+        self.valid_types = ['dts', 'drivers', 'config', 'kconfig', 'script', 'patch']
 
     def extract_json_from_markdown(self, content):
         """Extract JSON from Markdown-formatted response"""
@@ -50,7 +50,7 @@ class GitCommitAPI:
                     "content": f"""Analyze the following git diff and generate a CONCISE commit message in the format [cpu][machine][type] title followed by details.
 The cpu can be: imx8mm, imx8mp, imx93
 The machine can be: ROM-5721, ROM-5722, ROM-2820
-The type can be: dts, drivers, config, kconfig, script
+The type can be: dts, drivers, config, kconfig, script, patch
 {category_hint}
 
 Requirements for the response:
@@ -128,8 +128,8 @@ Please return a JSON object in this format:
         return out
 
     def classify_files(self, files):
-        """Classify files into dts, config, drivers, script"""
-        dts_files, config_files, drivers_files, script_files = [], [], [], []
+        """Classify files into dts, config, drivers, script, patch, others"""
+        dts_files, config_files, drivers_files, script_files, patch_files, other_files = [], [], [], [], [], []
         for f in files:
             if f.endswith(('.dts', '.dtsi')):
                 dts_files.append(f)
@@ -139,7 +139,11 @@ Please return a JSON object in this format:
                 drivers_files.append(f)
             elif f.endswith('.sh') or f.endswith('.py') or f.endswith('.pl') or 'build' in f.lower() or 'script' in f.lower():
                 script_files.append(f)
-        return dts_files, config_files, drivers_files, script_files
+            elif f.endswith('.patch'):
+                patch_files.append(f)
+            else:
+                other_files.append(f)
+        return dts_files, config_files, drivers_files, script_files, patch_files, other_files
 
     def get_diff_for_files(self, repo_path, files):
         """Get diff for the specified files (staged + unstaged)"""
@@ -227,7 +231,7 @@ def process_category(committer, repo_path, files, category):
         committer.execute_commit(repo_path, files, commit_message)
 
 def main():
-    parser = argparse.ArgumentParser(description='Auto categorize and commit DTS/CONFIG/DRIVERS/SCRIPT using Azure OpenAI')
+    parser = argparse.ArgumentParser(description='Auto categorize and commit DTS/CONFIG/DRIVERS/SCRIPT/PATCH using Azure OpenAI')
     parser.add_argument('repo_path', help='Path to the git repository')
     args = parser.parse_args()
     repo_path = args.repo_path
@@ -256,11 +260,24 @@ def main():
         finally:
             os.chdir(original_dir)
 
+    # 3. 自動 add 所有已變動（但尚未 staged）的 tracked 檔案
+    if changed_files:
+        print(f"\nAutomatically adding all changed files to staging:\n" + "\n".join(changed_files))
+        original_dir = os.getcwd()
+        os.chdir(repo_path)
+        try:
+            subprocess.run(['git', 'add'] + changed_files, check=True)
+            print("Automatically added changed files to staging.")
+            # 再次 refresh changed_files
+            changed_files = committer.get_changed_files(repo_path)
+        finally:
+            os.chdir(original_dir)
+
     if not changed_files:
         print("No changes to commit")
         return
 
-    dts_files, config_files, drivers_files, script_files = committer.classify_files(changed_files)
+    dts_files, config_files, drivers_files, script_files, patch_files, other_files = committer.classify_files(changed_files)
 
     if dts_files:
         process_category(committer, repo_path, dts_files, 'dts')
@@ -270,6 +287,10 @@ def main():
         process_category(committer, repo_path, drivers_files, 'drivers')
     if script_files:
         process_category(committer, repo_path, script_files, 'script')
+    if patch_files:
+        process_category(committer, repo_path, patch_files, 'patch')
+    if other_files:
+        process_category(committer, repo_path, other_files, 'other')
 
     if input("\nAll commits done. Push now? (y/n): ").lower() == 'y':
         committer.push_changes(repo_path)
